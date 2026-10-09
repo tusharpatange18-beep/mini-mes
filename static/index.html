@@ -1,132 +1,1026 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mini MES</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 24px auto; max-width: 960px; padding: 0 16px; color: #1a1a1a; }
-  h1 { font-size: 22px; margin-bottom: 4px; }
-  .bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
-  input, select, button { font: inherit; padding: 6px 10px; }
-  button { cursor: pointer; }
-  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-  th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
-  .status { font-weight: 600; }
-  pre { background: #f5f5f5; padding: 12px; overflow: auto; max-height: 320px; }
-  .hint { color: #666; font-size: 13px; }
-</style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mini MES · Line board</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --concrete: #E8EBEE;
+            --panel: #FFFFFF;
+            --line: #CDD3DA;
+            --ink: #16202B;
+            --muted: #566170;
+            --blue: #0B5FA5;
+            --blue-deep: #073F70;
+            --green: #1B7F46;
+            --red: #BE2D2D;
+            --radius: 6px;
+            --body: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+            --head: 'Barlow Semi Condensed', 'Barlow', system-ui, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--concrete);
+            color: var(--ink);
+            font: 400 15px/1.45 var(--body);
+        }
+
+        h1,
+        h2,
+        h3 {
+            font-family: var(--head);
+            margin: 0;
+            letter-spacing: 0.005em;
+        }
+
+        button,
+        input {
+            font: inherit;
+            color: inherit;
+        }
+
+        :focus-visible {
+            outline: 2px solid var(--blue);
+            outline-offset: 2px;
+        }
+
+        /* Top bar */
+        .top {
+            background: var(--ink);
+            color: #fff;
+        }
+
+        .top-in {
+            max-width: 1480px;
+            margin: 0 auto;
+            padding: 14px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px 24px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand h1 {
+            font-size: 26px;
+            font-weight: 700;
+            line-height: 1.1;
+        }
+
+        .brand p {
+            margin: 2px 0 0;
+            color: #B8C2CE;
+            font-size: 14px;
+        }
+
+        .tools {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .search {
+            display: flex;
+        }
+
+        .search input {
+            width: 180px;
+            padding: 8px 10px;
+            border: 1px solid #3A4757;
+            border-right: 0;
+            border-radius: var(--radius) 0 0 var(--radius);
+            background: #0F1822;
+            color: #fff;
+        }
+
+        .search input::placeholder {
+            color: #8895A5;
+        }
+
+        .search button {
+            padding: 8px 12px;
+            border: 1px solid #3A4757;
+            border-radius: 0 var(--radius) var(--radius) 0;
+            background: #243242;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .search button:hover {
+            background: #2E4054;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 7px 12px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--panel);
+            cursor: pointer;
+            font-weight: 500;
+            line-height: 1.2;
+        }
+
+        .btn:hover {
+            border-color: #9AA5B1;
+        }
+
+        .btn.primary {
+            background: var(--blue);
+            border-color: var(--blue);
+            color: #fff;
+        }
+
+        .btn.primary:hover {
+            background: var(--blue-deep);
+            border-color: var(--blue-deep);
+        }
+
+        .btn.danger {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .btn.danger:hover {
+            background: #FBEDED;
+        }
+
+        .btn.danger.solid {
+            background: var(--red);
+            color: #fff;
+        }
+
+        .btn.danger.solid:hover {
+            background: #9E2323;
+        }
+
+        .btn.ghost {
+            border-color: transparent;
+            background: transparent;
+        }
+
+        .btn[aria-disabled="true"] {
+            background: #F1F3F5;
+            border-color: #E1E5EA;
+            color: #7A8591;
+            cursor: not-allowed;
+        }
+
+        /* Role bar */
+        .roles {
+            background: var(--panel);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .roles-in {
+            max-width: 1480px;
+            margin: 0 auto;
+            padding: 12px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 24px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .who {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 16px;
+            align-items: center;
+        }
+
+        .who>span {
+            font-weight: 600;
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .chip {
+            padding: 6px 12px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: var(--panel);
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .chip:hover {
+            border-color: #9AA5B1;
+        }
+
+        .chip[aria-pressed="true"] {
+            background: var(--ink);
+            border-color: var(--ink);
+            color: #fff;
+        }
+
+        .role-note {
+            color: var(--muted);
+            font-size: 14px;
+            flex-basis: 100%;
+            margin: 0;
+        }
+
+        .rule {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .rule input {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--red);
+        }
+
+        .rule small {
+            color: var(--muted);
+            font-weight: 400;
+        }
+
+        /* Board */
+        main {
+            max-width: 1480px;
+            margin: 0 auto;
+            padding: 18px 20px 48px;
+        }
+
+        .board {
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: minmax(188px, 1fr);
+            gap: 12px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+            scroll-snap-type: x proximity;
+        }
+
+        .col {
+            scroll-snap-align: start;
+            border-top: 4px solid #8794A3;
+            background: #DDE2E7;
+            border-radius: 0 0 var(--radius) var(--radius);
+            min-height: 220px;
+        }
+
+        .col[data-s="QC_FAILED"] {
+            border-top-color: var(--red);
+        }
+
+        .col[data-s="QC_PASSED"] {
+            border-top-color: var(--green);
+        }
+
+        .col[data-s="DISPATCHED"] {
+            border-top-color: var(--ink);
+        }
+
+        .col-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 10px 12px 8px;
+        }
+
+        .col-head h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .col-head span {
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .col-body {
+            display: grid;
+            gap: 8px;
+            padding: 0 8px 10px;
+            align-content: start;
+        }
+
+        .col-empty {
+            margin: 4px 4px 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 10px 12px 12px;
+        }
+
+        .card.flash {
+            animation: flash 1.4s ease-out;
+        }
+
+        @keyframes flash {
+            from {
+                background: #DCEBFA;
+                border-color: var(--blue);
+            }
+
+            to {
+                background: var(--panel);
+                border-color: var(--line);
+            }
+        }
+
+        .ref {
+            font: 700 19px/1.2 var(--head);
+            padding: 0;
+            border: 0;
+            background: none;
+            color: var(--blue);
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .ref:hover {
+            text-decoration: underline;
+        }
+
+        .ref.plain {
+            color: var(--muted);
+            cursor: default;
+        }
+
+        .ref.plain:hover {
+            text-decoration: none;
+        }
+
+        .card .prod {
+            margin: 2px 0 0;
+            font-weight: 500;
+        }
+
+        .card .meta {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .acts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .acts .btn {
+            padding: 6px 10px;
+            font-size: 14px;
+        }
+
+        .scrap {
+            margin-top: 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            color: var(--muted);
+        }
+
+        .scrap .btn {
+            padding: 4px 10px;
+            font-size: 14px;
+            border-color: #D9A5A5;
+            color: var(--red);
+        }
+
+        .empty {
+            background: var(--panel);
+            border: 1px dashed #9AA5B1;
+            border-radius: var(--radius);
+            padding: 28px 24px;
+            max-width: 520px;
+            margin: 24px 0;
+        }
+
+        .empty h2 {
+            font-size: 22px;
+        }
+
+        .empty p {
+            margin: 6px 0 16px;
+            color: var(--muted);
+        }
+
+        /* Dialog + drawer */
+        dialog {
+            border: 0;
+            border-radius: 8px;
+            padding: 0;
+            color: var(--ink);
+            background: var(--panel);
+        }
+
+        dialog::backdrop {
+            background: rgba(14, 22, 32, 0.55);
+        }
+
+        #dlg {
+            width: min(440px, calc(100% - 32px));
+            animation: pop 0.14s ease-out;
+        }
+
+        @keyframes pop {
+            from {
+                transform: translateY(6px);
+                opacity: 0;
+            }
+
+            to {
+                transform: none;
+                opacity: 1;
+            }
+        }
+
+        #dlg form {
+            padding: 20px;
+            display: grid;
+            gap: 14px;
+        }
+
+        #dlg h2 {
+            font-size: 24px;
+        }
+
+        #dlg .sub {
+            margin: -10px 0 0;
+            color: var(--muted);
+        }
+
+        .field label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .field input {
+            width: 100%;
+            padding: 9px 10px;
+            border: 1px solid #9AA5B1;
+            border-radius: var(--radius);
+            background: #fff;
+        }
+
+        .hint {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .form-err {
+            margin: 0;
+            padding: 9px 11px;
+            border-radius: var(--radius);
+            background: #FBEDED;
+            color: #8C1F1F;
+            border: 1px solid #E8B8B8;
+        }
+
+        .form-err[hidden] {
+            display: none;
+        }
+
+        .row-end {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        #drawer {
+            margin: 0 0 0 auto;
+            height: 100%;
+            max-height: 100%;
+            width: min(470px, 100%);
+            border-radius: 0;
+            animation: slide 0.18s ease-out;
+        }
+
+        @keyframes slide {
+            from {
+                transform: translateX(24px);
+                opacity: 0;
+            }
+
+            to {
+                transform: none;
+                opacity: 1;
+            }
+        }
+
+        .dr-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: flex-start;
+            padding: 18px 20px 12px;
+            border-bottom: 1px solid var(--line);
+            position: sticky;
+            top: 0;
+            background: var(--panel);
+        }
+
+        .dr-head h2 {
+            font-size: 28px;
+            line-height: 1.1;
+        }
+
+        .dr-head p {
+            margin: 4px 0 0;
+            color: var(--muted);
+        }
+
+        .dr-body {
+            padding: 4px 20px 28px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 9px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            background: #E3ECF5;
+            color: var(--blue-deep);
+            margin-top: 6px;
+        }
+
+        .badge.QC_FAILED,
+        .badge.SCRAPPED {
+            background: #FBEDED;
+            color: #8C1F1F;
+        }
+
+        .badge.QC_PASSED {
+            background: #E2F3E9;
+            color: #14623A;
+        }
+
+        .badge.DISPATCHED {
+            background: var(--ink);
+            color: #fff;
+        }
+
+        .dr-body h3 {
+            font-size: 18px;
+            margin: 20px 0 8px;
+        }
+
+        .timeline {
+            list-style: none;
+            margin: 0;
+            padding: 0 0 0 14px;
+            border-left: 2px solid var(--line);
+        }
+
+        .timeline li {
+            position: relative;
+            padding: 0 0 14px 14px;
+        }
+
+        .timeline li::before {
+            content: "";
+            position: absolute;
+            left: -22px;
+            top: 6px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--blue);
+            border: 2px solid var(--panel);
+        }
+
+        .timeline li:last-child {
+            padding-bottom: 0;
+        }
+
+        .timeline strong {
+            font-weight: 600;
+        }
+
+        .timeline small {
+            display: block;
+            color: var(--muted);
+        }
+
+        .kv {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 4px 16px;
+            margin: 0;
+        }
+
+        .kv dt {
+            color: var(--muted);
+        }
+
+        .kv dd {
+            margin: 0;
+        }
+
+        .kv-group+.kv-group {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--line);
+        }
+
+        /* Toasts */
+        #toasts {
+            position: fixed;
+            left: 50%;
+            bottom: 20px;
+            transform: translateX(-50%);
+            display: grid;
+            gap: 8px;
+            width: min(520px, calc(100% - 32px));
+            z-index: 50;
+            pointer-events: none;
+        }
+
+        .toast {
+            pointer-events: auto;
+            padding: 11px 14px;
+            border-radius: var(--radius);
+            background: var(--ink);
+            color: #fff;
+            border-left: 5px solid var(--green);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+        }
+
+        .toast.err {
+            border-left-color: #F27A7A;
+        }
+
+        @media (max-width: 640px) {
+            .board {
+                grid-auto-columns: 82%;
+            }
+
+            .search input {
+                width: 130px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
 </head>
+
 <body>
-<h1>Mini MES: work order to dispatch</h1>
-<p class="hint">Pick a role, then use the buttons. The server rejects actions that skip a step or use the wrong role.</p>
 
-<div class="bar">
-  <label>Role
-    <select id="role">
-      <option>PLANNER</option><option>STORE_KEEPER</option><option>OPERATOR</option>
-      <option>QC_INSPECTOR</option><option>DISPATCH_CLERK</option>
-    </select>
-  </label>
-</div>
+    <header class="top">
+        <div class="top-in">
+            <div class="brand">
+                <h1>Mini MES</h1>
+                <p>Bottling line 1: work orders from release to dispatch</p>
+            </div>
+            <div class="tools">
+                <form class="search" id="search" role="search">
+                    <input id="find" name="find" placeholder="Batch, e.g. B-0001" aria-label="Find a batch by number"
+                        autocomplete="off">
+                    <button type="submit">Find</button>
+                </form>
+                <button class="btn primary" id="new-order" type="button">New work order</button>
+            </div>
+        </div>
+    </header>
 
-<div class="bar">
-  <strong>New work order</strong>
-  <input id="product" placeholder="Product" value="Orange juice 1L">
-  <input id="qty" type="number" placeholder="Quantity" value="500" style="width:90px">
-  <input id="due" type="date">
-  <button onclick="createWo()">Create</button>
-</div>
+    <section class="roles" aria-label="Role">
+        <div class="roles-in">
+            <div class="who">
+                <span id="who-label">Working as</span>
+                <div class="chips" id="chips" role="group" aria-labelledby="who-label"></div>
+            </div>
+            <label class="rule">
+                <input type="checkbox" id="rule">
+                <span>Show blocked actions <small>(try steps the system should refuse)</small></span>
+            </label>
+            <p class="role-note" id="role-note"></p>
+        </div>
+    </section>
 
-<table>
-  <thead><tr><th>ID</th><th>Product</th><th>Qty</th><th>Batch</th><th>Status</th><th>Actions</th></tr></thead>
-  <tbody id="rows"></tbody>
-</table>
+    <main>
+        <div id="board-wrap"></div>
+    </main>
 
-<div class="bar">
-  <strong>Trace a batch</strong>
-  <input id="batch" placeholder="B-0001">
-  <button onclick="trace()">Search</button>
-</div>
-<pre id="out">Results appear here.</pre>
+    <dialog id="dlg" aria-labelledby="dlg-title"></dialog>
+    <dialog id="drawer" aria-label="Batch history"></dialog>
+    <div id="toasts" aria-live="polite"></div>
 
-<script>
-const role = () => document.getElementById('role').value;
-const out = (x) => document.getElementById('out').textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
-document.getElementById('due').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+    <script>
+        const ROLES = [
+            ['PLANNER', 'Planner', 'Creates and releases work orders.'],
+            ['STORE_KEEPER', 'Store Keeper', 'Issues material and moves passed batches to finished goods.'],
+            ['OPERATOR', 'Line Operator', 'Starts production and reports good and rejected quantity.'],
+            ['QC_INSPECTOR', 'QC Inspector', 'Records pass or fail, then decides rework or scrap.'],
+            ['DISPATCH_CLERK', 'Dispatch Clerk', 'Dispatches batches that passed QC.'],
+        ];
+        const STATUS_LABEL = {
+            CREATED: 'Created', RELEASED: 'Released', IN_PRODUCTION: 'In production', QC_PENDING: 'QC pending',
+            QC_FAILED: 'QC failed', QC_PASSED: 'QC passed', DISPATCHED: 'Dispatched', SCRAPPED: 'Scrapped',
+        };
+        const COLUMNS = ['CREATED', 'RELEASED', 'IN_PRODUCTION', 'QC_PENDING', 'QC_FAILED', 'QC_PASSED', 'DISPATCHED'];
+        const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r[0], r[1]]));
+        const LABELS = Object.assign({}, ROLE_LABEL, STATUS_LABEL);
 
-async function call(path, body) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Role': role() },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) { alert('Rejected: ' + (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail))); }
-  await load();
-  return res.ok;
-}
+        const ACTIONS = [
+            { label: 'Release order', done: 'Released', status: 'CREATED', role: 'PLANNER', path: 'release', primary: true },
+            {
+                label: 'Issue material', done: 'Material issued', status: 'RELEASED', role: 'STORE_KEEPER', path: 'issue-material', primary: true,
+                fields: [
+                    { name: 'lot_no', label: 'Material lot number', placeholder: 'L-101', required: true },
+                    { name: 'qty', label: 'Quantity issued', type: 'number', step: 'any', min: '0.001', required: true },
+                ],
+                body: v => ({ lot_no: v.lot_no.trim(), qty: Number(v.qty) })
+            },
+            { label: 'Start production', done: 'Production started', status: 'RELEASED', role: 'OPERATOR', path: 'start' },
+            {
+                label: 'Report output', done: 'Output reported', status: 'IN_PRODUCTION', role: 'OPERATOR', path: 'production', primary: true,
+                fields: [
+                    { name: 'good_qty', label: 'Good quantity', type: 'number', min: '0', step: '1', required: true },
+                    { name: 'rejected_qty', label: 'Rejected quantity', type: 'number', min: '0', step: '1', required: true, value: '0' },
+                    { name: 'reason_code', label: 'Reason code', placeholder: 'SPILL', hint: 'Required when rejected quantity is above 0.' },
+                ],
+                body: v => ({ good_qty: Number(v.good_qty), rejected_qty: Number(v.rejected_qty), reason_code: v.reason_code.trim() || null })
+            },
+            { label: 'Record pass', done: 'QC pass recorded', status: 'QC_PENDING', role: 'QC_INSPECTOR', path: 'qc', primary: true, body: () => ({ result: 'PASS' }) },
+            { label: 'Record fail', done: 'QC fail recorded', status: 'QC_PENDING', role: 'QC_INSPECTOR', path: 'qc', danger: true, body: () => ({ result: 'FAIL' }) },
+            {
+                label: 'Send to rework', done: 'Sent to rework', status: 'QC_FAILED', role: 'QC_INSPECTOR', path: 'disposition', primary: true,
+                fields: [{ name: 'defect_type', label: 'Defect type', placeholder: 'Underfill', required: true }],
+                body: v => ({ decision: 'REWORK', defect_type: v.defect_type.trim() })
+            },
+            {
+                label: 'Scrap batch', done: 'Batch scrapped', status: 'QC_FAILED', role: 'QC_INSPECTOR', path: 'disposition', danger: true,
+                fields: [{ name: 'defect_type', label: 'Defect type', placeholder: 'Underfill', required: true }],
+                body: v => ({ decision: 'SCRAP', defect_type: v.defect_type.trim() })
+            },
+            { label: 'Move to finished goods', done: 'Moved to finished goods', status: 'QC_PASSED', role: 'STORE_KEEPER', path: 'finished-goods' },
+            {
+                label: 'Dispatch', done: 'Dispatched', status: 'QC_PASSED', role: 'DISPATCH_CLERK', path: 'dispatch', primary: true,
+                fields: [
+                    { name: 'customer_order', label: 'Customer order', placeholder: 'CO-77', required: true },
+                    { name: 'qty', label: 'Quantity dispatched', type: 'number', min: '1', step: '1', required: true },
+                ],
+                body: v => ({ customer_order: v.customer_order.trim(), qty: Number(v.qty) })
+            },
+        ];
 
-const createWo = () => call('/work-orders', {
-  product: document.getElementById('product').value,
-  quantity: Number(document.getElementById('qty').value),
-  due_date: document.getElementById('due').value,
-});
+        const $ = (s, r = document) => r.querySelector(s);
+        function el(tag, attrs = {}, ...kids) {
+            const n = document.createElement(tag);
+            for (const [k, v] of Object.entries(attrs)) {
+                if (v === false || v == null) continue;
+                if (k === 'class') n.className = v;
+                else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+                else n.setAttribute(k, v === true ? '' : v);
+            }
+            for (const kid of kids.flat(Infinity)) {
+                if (kid == null || kid === false) continue;
+                n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+            }
+            return n;
+        }
+        const store = {
+            get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+            set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } },
+        };
+        const state = { role: store.get('mes.role') || 'PLANNER', rule: false, orders: [], flash: null };
+        if (!ROLE_LABEL[state.role]) state.role = 'PLANNER';
 
-const actions = {
-  CREATED: (id) => [['Release', () => call(`/work-orders/${id}/release`)]],
-  RELEASED: (id) => [
-    ['Issue material', () => { const lot = prompt('Material lot number'); const q = prompt('Quantity'); if (lot && q) call(`/work-orders/${id}/issue-material`, { lot_no: lot, qty: Number(q) }); }],
-    ['Start production', () => call(`/work-orders/${id}/start`)],
-  ],
-  IN_PRODUCTION: (id) => [['Report output', () => {
-    const g = prompt('Good quantity'); const r = prompt('Rejected quantity'); const rc = r > 0 ? prompt('Reason code') : '';
-    if (g !== null && r !== null) call(`/work-orders/${id}/production`, { good_qty: Number(g), rejected_qty: Number(r), reason_code: rc || null });
-  }]],
-  QC_PENDING: (id) => [
-    ['QC pass', () => call(`/work-orders/${id}/qc`, { result: 'PASS' })],
-    ['QC fail', () => call(`/work-orders/${id}/qc`, { result: 'FAIL' })],
-  ],
-  QC_FAILED: (id) => [
-    ['Rework', () => { const d = prompt('Defect type'); if (d) call(`/work-orders/${id}/disposition`, { decision: 'REWORK', defect_type: d }); }],
-    ['Scrap', () => { const d = prompt('Defect type'); if (d) call(`/work-orders/${id}/disposition`, { decision: 'SCRAP', defect_type: d }); }],
-  ],
-  QC_PASSED: (id) => [
-    ['To finished goods', () => call(`/work-orders/${id}/finished-goods`)],
-    ['Dispatch', () => { const c = prompt('Customer order'); const q = prompt('Quantity'); if (c && q) call(`/work-orders/${id}/dispatch`, { customer_order: c, qty: Number(q) }); }],
-  ],
-};
+        const fmtDue = d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        const fmtTime = t => new Date(t).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+        const plain = s => String(s).replace(/\b[A-Z][A-Z_]+\b/g, m => LABELS[m] || m);
 
-// Failed-batch shortcuts so the rejection rules can be seen from the UI.
-const always = (id) => [
-  ['Try dispatch', () => { const c = prompt('Customer order'); const q = prompt('Quantity'); if (c && q) call(`/work-orders/${id}/dispatch`, { customer_order: c, qty: Number(q) }); }],
-];
+        async function api(path, method = 'GET', body) {
+            const res = await fetch(path, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'X-Role': state.role },
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            let data = null;
+            try { data = await res.json(); } catch (e) { /* no body */ }
+            return { ok: res.ok, status: res.status, data };
+        }
+        function problem(r) {
+            const d = r.data && r.data.detail;
+            if (!d) return 'Something went wrong. Try again.';
+            if (typeof d === 'string') return plain(d) + '.';
+            if (Array.isArray(d)) return d.map(e => `${(e.loc || []).slice(1).join(' ') || 'Input'}: ${e.msg}`).join('. ') + '.';
+            return JSON.stringify(d);
+        }
+        function toast(msg, type = 'ok') {
+            const t = el('div', { class: 'toast ' + (type === 'err' ? 'err' : ''), role: type === 'err' ? 'alert' : 'status' }, msg);
+            const box = $('#toasts');
+            box.append(t);
+            while (box.children.length > 3) box.firstElementChild.remove();
+            setTimeout(() => t.remove(), type === 'err' ? 8000 : 4000);
+        }
 
-async function load() {
-  const list = await (await fetch('/work-orders')).json();
-  const rows = document.getElementById('rows');
-  rows.innerHTML = '';
-  for (const wo of list) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${wo.id}</td><td>${wo.product}</td><td>${wo.quantity}</td><td>${wo.batch_no || ''}</td><td class="status">${wo.status}</td><td></td>`;
-    const cell = tr.lastChild;
-    const list2 = [...(actions[wo.status] ? actions[wo.status](wo.id) : []), ...(wo.status === 'DISPATCHED' || wo.status === 'SCRAPPED' ? [] : always(wo.id))];
-    for (const [label, fn] of list2) {
-      const b = document.createElement('button');
-      b.textContent = label; b.onclick = fn; b.style.marginRight = '6px';
-      cell.appendChild(b);
-    }
-    rows.appendChild(tr);
-  }
-}
+        /* Roles */
+        function renderRoles() {
+            const chips = $('#chips');
+            chips.replaceChildren(...ROLES.map(([code, label]) =>
+                el('button', {
+                    class: 'chip', type: 'button', 'aria-pressed': String(code === state.role),
+                    onclick: () => { state.role = code; store.set('mes.role', code); renderRoles(); renderBoard(); }
+                }, label)));
+            $('#role-note').textContent = ROLES.find(r => r[0] === state.role)[2];
+        }
 
-async function trace() {
-  const b = document.getElementById('batch').value.trim();
-  const res = await fetch('/trace/' + encodeURIComponent(b));
-  out(await res.json());
-}
+        /* Board */
+        function card(wo) {
+            const ref = wo.batch_no
+                ? el('button', { class: 'ref', type: 'button', title: 'Open batch history', onclick: () => openTrace(wo.batch_no) }, wo.batch_no)
+                : el('span', { class: 'ref plain' }, `Order #${wo.id}`);
+            const acts = ACTIONS.filter(a => state.rule || a.status === wo.status);
+            const buttons = acts.map(a => {
+                const allowed = state.rule || a.role === state.role;
+                const cls = 'btn ' + (a.danger ? 'danger' : (a.primary && allowed ? 'primary' : ''));
+                return el('button', {
+                    class: cls, type: 'button', 'aria-disabled': allowed ? false : 'true',
+                    title: allowed ? false : `Needs ${ROLE_LABEL[a.role]}`,
+                    onclick: () => allowed ? perform(wo, a) : toast(`Switch to ${ROLE_LABEL[a.role]} to use "${a.label}".`, 'err'),
+                }, a.label);
+            });
+            const c = el('article', { class: 'card', 'data-id': wo.id },
+                ref,
+                el('p', { class: 'prod' }, wo.product),
+                el('p', { class: 'meta' }, `${wo.quantity} units · due ${fmtDue(wo.due_date)}`),
+                buttons.length ? el('div', { class: 'acts' }, buttons) : null);
+            return c;
+        }
 
-load();
-</script>
+        function renderBoard() {
+            const wrap = $('#board-wrap');
+            if (!state.orders.length) {
+                wrap.replaceChildren(el('div', { class: 'empty' },
+                    el('h2', {}, 'No work orders yet'),
+                    el('p', {}, 'Create the first order to start the line. Orders move left to right as each role completes a step.'),
+                    el('button', { class: 'btn primary', type: 'button', onclick: openNewOrder }, 'New work order')));
+                return;
+            }
+            const cols = COLUMNS.map(s => {
+                const items = state.orders.filter(o => o.status === s);
+                return el('section', { class: 'col', 'data-s': s, 'aria-label': STATUS_LABEL[s] },
+                    el('div', { class: 'col-head' }, el('h2', {}, STATUS_LABEL[s]), el('span', {}, items.length)),
+                    el('div', { class: 'col-body' }, items.length ? items.map(card) : el('p', { class: 'col-empty' }, 'Nothing here')));
+            });
+            const scrapped = state.orders.filter(o => o.status === 'SCRAPPED');
+            const parts = [el('div', { class: 'board' }, cols)];
+            if (scrapped.length) {
+                parts.push(el('div', { class: 'scrap' }, el('span', {}, `Scrapped (${scrapped.length}):`),
+                    scrapped.map(o => el('button', { class: 'btn', type: 'button', onclick: () => openTrace(o.batch_no) }, o.batch_no))));
+            }
+            wrap.replaceChildren(...parts);
+            if (state.flash != null) {
+                const node = wrap.querySelector(`.card[data-id="${state.flash}"]`);
+                if (node) node.classList.add('flash');
+                state.flash = null;
+            }
+        }
+
+        async function refresh() {
+            const r = await api('/work-orders');
+            if (r.ok) { state.orders = r.data; renderBoard(); }
+            else toast('Could not load work orders. Is the server running?', 'err');
+        }
+
+        /* Actions */
+        async function perform(wo, a) {
+            const ref = wo.batch_no || `Order #${wo.id}`;
+            const run = async (values = {}) => {
+                const r = await api(`/work-orders/${wo.id}/${a.path}`, 'POST', a.body ? a.body(values) : undefined);
+                if (r.ok) { state.flash = wo.id; toast(`${a.done}: ${ref}`); await refresh(); return null; }
+                return problem(r);
+            };
+            if (a.fields) {
+                openForm({ title: a.label, sub: `${ref} · ${wo.product}`, fields: a.fields, submit: a.label, danger: a.danger, onSubmit: run });
+            } else {
+                const msg = await run();
+                if (msg) toast(msg, 'err');
+            }
+        }
+
+        function openForm({ title, sub, fields, submit, danger, onSubmit }) {
+            const dlg = $('#dlg');
+            const err = el('p', { class: 'form-err', role: 'alert', hidden: true });
+            const form = el('form', { method: 'dialog' },
+                el('h2', { id: 'dlg-title' }, title),
+                sub ? el('p', { class: 'sub' }, sub) : null,
+                fields.map(f => el('div', { class: 'field' },
+                    el('label', { for: 'f-' + f.name }, f.label),
+                    el('input', {
+                        id: 'f-' + f.name, name: f.name, type: f.type || 'text', placeholder: f.placeholder, required: !!f.required,
+                        min: f.min, step: f.step, value: f.value, autocomplete: 'off'
+                    }),
+                    f.hint ? el('p', { class: 'hint' }, f.hint) : null)),
+                err,
+                el('div', { class: 'row-end' },
+                    el('button', { class: 'btn ghost', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
+                    el('button', { class: 'btn ' + (danger ? 'danger solid' : 'primary'), type: 'submit' }, submit)));
+            form.addEventListener('submit', async e => {
+                e.preventDefault();
+                const msg = await onSubmit(Object.fromEntries(new FormData(form)));
+                if (msg) { err.textContent = msg; err.hidden = false; } else dlg.close();
+            });
+            dlg.replaceChildren(form);
+            dlg.showModal();
+            const first = form.querySelector('input');
+            if (first) first.focus();
+        }
+
+        function openNewOrder() {
+            const due = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+            openForm({
+                title: 'New work order', sub: 'Planner creates the order, then releases it to the line.', submit: 'Create work order',
+                fields: [
+                    { name: 'product', label: 'Product', value: 'Orange juice 1L', required: true },
+                    { name: 'quantity', label: 'Quantity', type: 'number', min: '1', step: '1', value: '500', required: true },
+                    { name: 'due_date', label: 'Due date', type: 'date', value: due, required: true },
+                ],
+                onSubmit: async v => {
+                    const r = await api('/work-orders', 'POST', { product: v.product.trim(), quantity: Number(v.quantity), due_date: v.due_date });
+                    if (!r.ok) return problem(r);
+                    state.flash = r.data.id;
+                    toast(`Created: Order #${r.data.id}`);
+                    await refresh();
+                    return null;
+                },
+            });
+        }
+
+        /* Batch history */
+        function kvGroup(rows) {
+            return el('dl', { class: 'kv kv-group' }, rows.map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]));
+        }
+        async function openTrace(batch) {
+            const r = await api(`/trace/${encodeURIComponent(batch)}`);
+            if (!r.ok) { toast(r.status === 404 ? `No batch ${batch} found. Batch numbers look like B-0001.` : problem(r), 'err'); return; }
+            const t = r.data, wo = t.work_order, d = $('#drawer');
+            const sections = [
+                el('h3', {}, 'Timeline'),
+                el('ol', { class: 'timeline' }, t.status_history.map(s =>
+                    el('li', {}, el('strong', {}, STATUS_LABEL[s.to_status] || s.to_status), el('small', {}, `${ROLE_LABEL[s.role] || s.role} · ${fmtTime(s.changed_at)}`)))),
+            ];
+            if (t.material_lots.length) sections.push(el('h3', {}, 'Material lots'), t.material_lots.map(m => kvGroup([['Lot', m.lot_no], ['Quantity', m.qty], ['Issued', fmtTime(m.issued_at)]])));
+            if (t.production.length) sections.push(el('h3', {}, 'Production'), t.production.map(p => kvGroup([['Good', p.good_qty], ['Rejected', p.rejected_qty], p.reason_code ? ['Reason', p.reason_code] : null].filter(Boolean))));
+            if (t.qc.length) sections.push(el('h3', {}, 'Quality checks'), t.qc.map(q => kvGroup([['Result', q.result === 'PASS' ? 'Pass' : 'Fail'],
+            q.defect_type ? ['Defect', q.defect_type] : null, q.disposition ? ['Decision', q.disposition === 'REWORK' ? 'Rework' : 'Scrap'] : null].filter(Boolean))));
+            if (t.dispatch.length) sections.push(el('h3', {}, 'Dispatch'), t.dispatch.map(x => kvGroup([['Customer order', x.customer_order], ['Quantity', x.qty], ['Dispatched', fmtTime(x.dispatched_at)]])));
+            d.replaceChildren(
+                el('div', { class: 'dr-head' },
+                    el('div', {}, el('h2', {}, wo.batch_no), el('p', {}, `${wo.product} · ${wo.quantity} units · due ${fmtDue(wo.due_date)}`),
+                        el('span', { class: 'badge ' + wo.status }, STATUS_LABEL[wo.status] || wo.status)),
+                    el('button', { class: 'btn', type: 'button', onclick: () => d.close() }, 'Close')),
+                el('div', { class: 'dr-body' }, sections));
+            d.showModal();
+        }
+
+        /* Wiring */
+        $('#new-order').addEventListener('click', openNewOrder);
+        $('#rule').addEventListener('change', e => { state.rule = e.target.checked; renderBoard(); });
+        $('#search').addEventListener('submit', e => {
+            e.preventDefault();
+            const v = $('#find').value.trim().toUpperCase();
+            if (v) openTrace(v);
+        });
+        for (const id of ['#dlg', '#drawer']) {
+            $(id).addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+        }
+
+        renderRoles();
+        refresh();
+    </script>
 </body>
+
 </html>
