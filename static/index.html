@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini MES</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px auto; max-width: 960px; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+  input, select, button { font: inherit; padding: 6px 10px; }
+  button { cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+  .status { font-weight: 600; }
+  pre { background: #f5f5f5; padding: 12px; overflow: auto; max-height: 320px; }
+  .hint { color: #666; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Mini MES: work order to dispatch</h1>
+<p class="hint">Pick a role, then use the buttons. The server rejects actions that skip a step or use the wrong role.</p>
+
+<div class="bar">
+  <label>Role
+    <select id="role">
+      <option>PLANNER</option><option>STORE_KEEPER</option><option>OPERATOR</option>
+      <option>QC_INSPECTOR</option><option>DISPATCH_CLERK</option>
+    </select>
+  </label>
+</div>
+
+<div class="bar">
+  <strong>New work order</strong>
+  <input id="product" placeholder="Product" value="Orange juice 1L">
+  <input id="qty" type="number" placeholder="Quantity" value="500" style="width:90px">
+  <input id="due" type="date">
+  <button onclick="createWo()">Create</button>
+</div>
+
+<table>
+  <thead><tr><th>ID</th><th>Product</th><th>Qty</th><th>Batch</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<div class="bar">
+  <strong>Trace a batch</strong>
+  <input id="batch" placeholder="B-0001">
+  <button onclick="trace()">Search</button>
+</div>
+<pre id="out">Results appear here.</pre>
+
+<script>
+const role = () => document.getElementById('role').value;
+const out = (x) => document.getElementById('out').textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
+document.getElementById('due').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+
+async function call(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Role': role() },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) { alert('Rejected: ' + (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail))); }
+  await load();
+  return res.ok;
+}
+
+const createWo = () => call('/work-orders', {
+  product: document.getElementById('product').value,
+  quantity: Number(document.getElementById('qty').value),
+  due_date: document.getElementById('due').value,
+});
+
+const actions = {
+  CREATED: (id) => [['Release', () => call(`/work-orders/${id}/release`)]],
+  RELEASED: (id) => [
+    ['Issue material', () => { const lot = prompt('Material lot number'); const q = prompt('Quantity'); if (lot && q) call(`/work-orders/${id}/issue-material`, { lot_no: lot, qty: Number(q) }); }],
+    ['Start production', () => call(`/work-orders/${id}/start`)],
+  ],
+  IN_PRODUCTION: (id) => [['Report output', () => {
+    const g = prompt('Good quantity'); const r = prompt('Rejected quantity'); const rc = r > 0 ? prompt('Reason code') : '';
+    if (g !== null && r !== null) call(`/work-orders/${id}/production`, { good_qty: Number(g), rejected_qty: Number(r), reason_code: rc || null });
+  }]],
+  QC_PENDING: (id) => [
+    ['QC pass', () => call(`/work-orders/${id}/qc`, { result: 'PASS' })],
+    ['QC fail', () => call(`/work-orders/${id}/qc`, { result: 'FAIL' })],
+  ],
+  QC_FAILED: (id) => [
+    ['Rework', () => { const d = prompt('Defect type'); if (d) call(`/work-orders/${id}/disposition`, { decision: 'REWORK', defect_type: d }); }],
+    ['Scrap', () => { const d = prompt('Defect type'); if (d) call(`/work-orders/${id}/disposition`, { decision: 'SCRAP', defect_type: d }); }],
+  ],
+  QC_PASSED: (id) => [
+    ['To finished goods', () => call(`/work-orders/${id}/finished-goods`)],
+    ['Dispatch', () => { const c = prompt('Customer order'); const q = prompt('Quantity'); if (c && q) call(`/work-orders/${id}/dispatch`, { customer_order: c, qty: Number(q) }); }],
+  ],
+};
+
+// Failed-batch shortcuts so the rejection rules can be seen from the UI.
+const always = (id) => [
+  ['Try dispatch', () => { const c = prompt('Customer order'); const q = prompt('Quantity'); if (c && q) call(`/work-orders/${id}/dispatch`, { customer_order: c, qty: Number(q) }); }],
+];
+
+async function load() {
+  const list = await (await fetch('/work-orders')).json();
+  const rows = document.getElementById('rows');
+  rows.innerHTML = '';
+  for (const wo of list) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${wo.id}</td><td>${wo.product}</td><td>${wo.quantity}</td><td>${wo.batch_no || ''}</td><td class="status">${wo.status}</td><td></td>`;
+    const cell = tr.lastChild;
+    const list2 = [...(actions[wo.status] ? actions[wo.status](wo.id) : []), ...(wo.status === 'DISPATCHED' || wo.status === 'SCRAPPED' ? [] : always(wo.id))];
+    for (const [label, fn] of list2) {
+      const b = document.createElement('button');
+      b.textContent = label; b.onclick = fn; b.style.marginRight = '6px';
+      cell.appendChild(b);
+    }
+    rows.appendChild(tr);
+  }
+}
+
+async function trace() {
+  const b = document.getElementById('batch').value.trim();
+  const res = await fetch('/trace/' + encodeURIComponent(b));
+  out(await res.json());
+}
+
+load();
+</script>
+</body>
+</html>
