@@ -308,6 +308,22 @@ def dispatch(wo_id: int, body: Dispatch, x_role: Optional[str] = Header(None)):
     conn = db()
     wo = get_wo(conn, wo_id)
     need_status(wo, "QC_PASSED", msg="Only a batch that passed QC can be dispatched")
+
+    # Only units that were actually produced as good can be dispatched.
+    # After a rework there can be several reports; the latest one is the
+    # batch that just passed QC, so that is the one we compare against.
+    # (It always exists: a batch reaches QC_PASSED only after a production report.)
+    latest = conn.execute(
+        "SELECT good_qty FROM production_reports WHERE wo_id = ? ORDER BY id DESC LIMIT 1",
+        (wo_id,),
+    ).fetchone()
+    good_qty = latest["good_qty"]
+    if body.qty > good_qty:
+        raise HTTPException(
+            422,
+            f"Cannot dispatch {body.qty} units: only {good_qty} good units were produced",
+        )
+
     conn.execute(
         "INSERT INTO dispatches (wo_id, customer_order, qty, dispatched_at) VALUES (?,?,?,?)",
         (wo_id, body.customer_order, body.qty, now()),
