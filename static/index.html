@@ -737,21 +737,56 @@
     <div id="toasts" aria-live="polite"></div>
 
     <script>
+        // ===================================================================================
+        // Mini MES web UI. Plain JavaScript, no framework: we build the HTML with el() and
+        // redraw the board after every change. The server (app.py) checks every rule again,
+        // so this page only decides what to show; it never decides what is allowed.
+        // ===================================================================================
+
+        // ---- Fixed data ----
+
+        // The five roles: code sent to the server, label on screen, and what the role does
         const ROLES = [
-            ['PLANNER', 'Planner', 'Creates and releases work orders.'],
-            ['STORE_KEEPER', 'Store Keeper', 'Issues material and moves passed batches to finished goods.'],
-            ['OPERATOR', 'Line Operator', 'Starts production and reports good and rejected quantity.'],
-            ['QC_INSPECTOR', 'QC Inspector', 'Records pass or fail, then decides rework or scrap.'],
-            ['DISPATCH_CLERK', 'Dispatch Clerk', 'Dispatches batches that passed QC.'],
+            { code: 'PLANNER', label: 'Planner', note: 'Creates and releases work orders.' },
+            { code: 'STORE_KEEPER', label: 'Store Keeper', note: 'Issues material and moves passed batches to finished goods.' },
+            { code: 'OPERATOR', label: 'Line Operator', note: 'Starts production and reports good and rejected quantity.' },
+            { code: 'QC_INSPECTOR', label: 'QC Inspector', note: 'Records pass or fail, then decides rework or scrap.' },
+            { code: 'DISPATCH_CLERK', label: 'Dispatch Clerk', note: 'Dispatches batches that passed QC.' },
         ];
+
+        // Status code -> words shown on screen
         const STATUS_LABEL = {
             CREATED: 'Created', RELEASED: 'Released', IN_PRODUCTION: 'In production', QC_PENDING: 'QC pending',
             QC_FAILED: 'QC failed', QC_PASSED: 'QC passed', DISPATCHED: 'Dispatched', SCRAPPED: 'Scrapped',
         };
-        const COLUMNS = ['CREATED', 'RELEASED', 'IN_PRODUCTION', 'QC_PENDING', 'QC_FAILED', 'QC_PASSED', 'DISPATCHED'];
-        const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r[0], r[1]]));
-        const LABELS = Object.assign({}, ROLE_LABEL, STATUS_LABEL);
 
+        // The board's columns, left to right (scrapped orders are listed under the board instead)
+        const COLUMNS = ['CREATED', 'RELEASED', 'IN_PRODUCTION', 'QC_PENDING', 'QC_FAILED', 'QC_PASSED', 'DISPATCHED'];
+
+        // Role code -> label, e.g. ROLE_LABEL.PLANNER === 'Planner'
+        const ROLE_LABEL = {};
+        for (const role of ROLES) {
+            ROLE_LABEL[role.code] = role.label;
+        }
+
+        // Every code we know (roles and statuses) -> words, used to make server messages readable
+        const LABELS = {};
+        for (const code in ROLE_LABEL) {
+            LABELS[code] = ROLE_LABEL[code];
+        }
+        for (const code in STATUS_LABEL) {
+            LABELS[code] = STATUS_LABEL[code];
+        }
+
+        /*
+         * Every button a work order card can show. For each one:
+         *   status  = the card's status that shows this button
+         *   role    = the role allowed to press it
+         *   path    = the server endpoint: POST /work-orders/{id}/{path}
+         *   fields  = form fields to ask for first (optional)
+         *   body    = builds the JSON to send from the form values (optional)
+         *   done    = message shown after success
+         */
         const ACTIONS = [
             { label: 'Release order', done: 'Released', status: 'CREATED', role: 'PLANNER', path: 'release', primary: true },
             {
@@ -760,7 +795,9 @@
                     { name: 'lot_no', label: 'Material lot number', placeholder: 'L-101', required: true },
                     { name: 'qty', label: 'Quantity issued', type: 'number', step: 'any', min: '0.001', required: true },
                 ],
-                body: v => ({ lot_no: v.lot_no.trim(), qty: Number(v.qty) })
+                body: function (values) {
+                    return { lot_no: values.lot_no.trim(), qty: Number(values.qty) };
+                },
             },
             { label: 'Start production', done: 'Production started', status: 'RELEASED', role: 'OPERATOR', path: 'start' },
             {
@@ -770,19 +807,40 @@
                     { name: 'rejected_qty', label: 'Rejected quantity', type: 'number', min: '0', step: '1', required: true, value: '0' },
                     { name: 'reason_code', label: 'Reason code', placeholder: 'SPILL', hint: 'Required when rejected quantity is above 0.' },
                 ],
-                body: v => ({ good_qty: Number(v.good_qty), rejected_qty: Number(v.rejected_qty), reason_code: v.reason_code.trim() || null })
+                body: function (values) {
+                    // An empty reason box is sent as null (no reason)
+                    let reason = values.reason_code.trim();
+                    if (reason === '') {
+                        reason = null;
+                    }
+                    return { good_qty: Number(values.good_qty), rejected_qty: Number(values.rejected_qty), reason_code: reason };
+                },
             },
-            { label: 'Record pass', done: 'QC pass recorded', status: 'QC_PENDING', role: 'QC_INSPECTOR', path: 'qc', primary: true, body: () => ({ result: 'PASS' }) },
-            { label: 'Record fail', done: 'QC fail recorded', status: 'QC_PENDING', role: 'QC_INSPECTOR', path: 'qc', danger: true, body: () => ({ result: 'FAIL' }) },
+            {
+                label: 'Record pass', done: 'QC pass recorded', status: 'QC_PENDING', role: 'QC_INSPECTOR', path: 'qc', primary: true,
+                body: function () {
+                    return { result: 'PASS' };
+                },
+            },
+            {
+                label: 'Record fail', done: 'QC fail recorded', status: 'QC_PENDING', role: 'QC_INSPECTOR', path: 'qc', danger: true,
+                body: function () {
+                    return { result: 'FAIL' };
+                },
+            },
             {
                 label: 'Send to rework', done: 'Sent to rework', status: 'QC_FAILED', role: 'QC_INSPECTOR', path: 'disposition', primary: true,
                 fields: [{ name: 'defect_type', label: 'Defect type', placeholder: 'Underfill', required: true }],
-                body: v => ({ decision: 'REWORK', defect_type: v.defect_type.trim() })
+                body: function (values) {
+                    return { decision: 'REWORK', defect_type: values.defect_type.trim() };
+                },
             },
             {
                 label: 'Scrap batch', done: 'Batch scrapped', status: 'QC_FAILED', role: 'QC_INSPECTOR', path: 'disposition', danger: true,
                 fields: [{ name: 'defect_type', label: 'Defect type', placeholder: 'Underfill', required: true }],
-                body: v => ({ decision: 'SCRAP', defect_type: v.defect_type.trim() })
+                body: function (values) {
+                    return { decision: 'SCRAP', defect_type: values.defect_type.trim() };
+                },
             },
             { label: 'Move to finished goods', done: 'Moved to finished goods', status: 'QC_PASSED', role: 'STORE_KEEPER', path: 'finished-goods' },
             {
@@ -791,176 +849,481 @@
                     { name: 'customer_order', label: 'Customer order', placeholder: 'CO-77', required: true },
                     { name: 'qty', label: 'Quantity dispatched', type: 'number', min: '1', step: '1', required: true },
                 ],
-                body: v => ({ customer_order: v.customer_order.trim(), qty: Number(v.qty) })
+                body: function (values) {
+                    return { customer_order: values.customer_order.trim(), qty: Number(values.qty) };
+                },
             },
         ];
 
-        const $ = (s, r = document) => r.querySelector(s);
-        function el(tag, attrs = {}, ...kids) {
-            const n = document.createElement(tag);
-            for (const [k, v] of Object.entries(attrs)) {
-                if (v === false || v == null) continue;
-                if (k === 'class') n.className = v;
-                else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
-                else n.setAttribute(k, v === true ? '' : v);
-            }
-            for (const kid of kids.flat(Infinity)) {
-                if (kid == null || kid === false) continue;
-                n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
-            }
-            return n;
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+        // ---- Small helpers ----
+
+        /** Shortcut for document.querySelector: find('#chips') returns the element with id "chips". */
+        function find(selector) {
+            return document.querySelector(selector);
         }
+
+        /**
+         * Creates an HTML element. Example:
+         *   el('button', { class: 'btn', onclick: save }, 'Save')  ->  <button class="btn">Save</button>
+         * attrs: class -> className, onxxx -> event listener, true -> attribute without value,
+         *        false / null / undefined -> attribute left out.
+         * children: text, elements, or (nested) lists of them; null and false are skipped.
+         */
+        function el(tag, attrs, ...children) {
+            const node = document.createElement(tag);
+            if (!attrs) {
+                attrs = {};
+            }
+            for (const name in attrs) {
+                const value = attrs[name];
+                if (value === false || value === null || value === undefined) {
+                    continue; // leave this attribute out
+                }
+                if (name === 'class') {
+                    node.className = value;
+                } else if (name.startsWith('on')) {
+                    node.addEventListener(name.slice(2), value); // 'onclick' -> 'click'
+                } else if (value === true) {
+                    node.setAttribute(name, ''); // e.g. required, hidden
+                } else {
+                    node.setAttribute(name, value);
+                }
+            }
+            addChildren(node, children);
+            return node;
+        }
+
+        /** Adds children to a node; goes inside lists (and lists of lists). */
+        function addChildren(node, children) {
+            for (const child of children) {
+                if (child === null || child === undefined || child === false) {
+                    continue;
+                }
+                if (Array.isArray(child)) {
+                    addChildren(node, child);
+                } else if (child.nodeType) {
+                    node.append(child); // already an element
+                } else {
+                    node.append(document.createTextNode(String(child))); // text or a number
+                }
+            }
+        }
+
+        // Browser storage can be blocked (private mode); then we just don't remember the role
         const store = {
-            get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-            set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } },
+            get(key) {
+                try {
+                    return localStorage.getItem(key);
+                } catch (e) {
+                    return null;
+                }
+            },
+            set(key, value) {
+                try {
+                    localStorage.setItem(key, value);
+                } catch (e) {
+                    // storage unavailable: ignore
+                }
+            },
         };
-        const state = { role: store.get('mes.role') || 'PLANNER', rule: false, orders: [], flash: null };
-        if (!ROLE_LABEL[state.role]) state.role = 'PLANNER';
 
-        const fmtDue = d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        const fmtTime = t => new Date(t).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-        const plain = s => String(s).replace(/\b[A-Z][A-Z_]+\b/g, m => LABELS[m] || m);
+        // Everything the page remembers while it is open
+        const state = {
+            role: store.get('mes.role'),   // the chosen role (remembered between visits)
+            rule: false,                   // "Show blocked actions" checkbox
+            orders: [],                    // work orders from the server
+            flash: null,                   // id of the card to highlight after an action
+        };
+        if (!ROLE_LABEL[state.role]) {
+            state.role = 'PLANNER'; // nothing saved yet (or an unknown value)
+        }
 
-        async function api(path, method = 'GET', body) {
+        /** "2026-10-20" -> "20 Oct" */
+        function fmtDue(date) {
+            return new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        }
+
+        /** "2026-10-09T14:30:00" -> "9 Oct, 14:30" */
+        function fmtTime(time) {
+            return new Date(time).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+
+        /** Replaces codes in a server message with words: "QC_PASSED" -> "QC passed". */
+        function plain(text) {
+            return String(text).replace(/\b[A-Z][A-Z_]+\b/g, function (code) {
+                if (LABELS[code]) {
+                    return LABELS[code];
+                }
+                return code; // not a code we know: keep it
+            });
+        }
+
+        /** Calls the server. Always returns { ok, status, data } instead of throwing. */
+        async function api(path, method, body) {
+            if (!method) {
+                method = 'GET';
+            }
+            let bodyText = undefined;
+            if (body) {
+                bodyText = JSON.stringify(body);
+            }
             const res = await fetch(path, {
-                method,
+                method: method,
                 headers: { 'Content-Type': 'application/json', 'X-Role': state.role },
-                body: body ? JSON.stringify(body) : undefined,
+                body: bodyText,
             });
             let data = null;
-            try { data = await res.json(); } catch (e) { /* no body */ }
-            return { ok: res.ok, status: res.status, data };
+            try {
+                data = await res.json();
+            } catch (e) {
+                // no body (or not JSON)
+            }
+            return { ok: res.ok, status: res.status, data: data };
         }
-        function problem(r) {
-            const d = r.data && r.data.detail;
-            if (!d) return 'Something went wrong. Try again.';
-            if (typeof d === 'string') return plain(d) + '.';
-            if (Array.isArray(d)) return d.map(e => `${(e.loc || []).slice(1).join(' ') || 'Input'}: ${e.msg}`).join('. ') + '.';
-            return JSON.stringify(d);
+
+        /** Turns a failed server answer into a sentence for the user. */
+        function problem(response) {
+            let detail = null;
+            if (response.data) {
+                detail = response.data.detail;
+            }
+            if (!detail) {
+                return 'Something went wrong. Try again.';
+            }
+            // Our own errors (409, 403, ...) are one sentence
+            if (typeof detail === 'string') {
+                return plain(detail) + '.';
+            }
+            // Pydantic's 422 errors are a list, one item per bad field
+            if (Array.isArray(detail)) {
+                const parts = [];
+                for (const error of detail) {
+                    // error.loc is e.g. ['body', 'qty']; drop 'body' to get the field name
+                    let field = '';
+                    if (error.loc) {
+                        field = error.loc.slice(1).join(' ');
+                    }
+                    if (field === '') {
+                        field = 'Input';
+                    }
+                    parts.push(field + ': ' + error.msg);
+                }
+                return parts.join('. ') + '.';
+            }
+            return JSON.stringify(detail);
         }
-        function toast(msg, type = 'ok') {
-            const t = el('div', { class: 'toast ' + (type === 'err' ? 'err' : ''), role: type === 'err' ? 'alert' : 'status' }, msg);
-            const box = $('#toasts');
+
+        /** Shows a short message in the corner. type 'err' = red, stays longer. */
+        function toast(message, type) {
+            const isError = type === 'err';
+            let cssClass = 'toast ';
+            let ariaRole = 'status';
+            let showMs = 4000;
+            if (isError) {
+                cssClass = 'toast err';
+                ariaRole = 'alert'; // screen readers announce alerts at once
+                showMs = 8000;
+            }
+            const box = find('#toasts');
+            const t = el('div', { class: cssClass, role: ariaRole }, message);
             box.append(t);
-            while (box.children.length > 3) box.firstElementChild.remove();
-            setTimeout(() => t.remove(), type === 'err' ? 8000 : 4000);
+            // Keep at most 3 on screen: remove the oldest
+            while (box.children.length > 3) {
+                box.firstElementChild.remove();
+            }
+            setTimeout(function () { t.remove(); }, showMs);
         }
 
-        /* Roles */
+        /** "Order #3" before release, the batch number after. */
+        function orderRef(wo) {
+            if (wo.batch_no) {
+                return wo.batch_no;
+            }
+            return 'Order #' + wo.id;
+        }
+
+        // ---- Role chips ----
+
+        function chooseRole(code) {
+            state.role = code;
+            store.set('mes.role', code); // remember for the next visit
+            renderRoles();
+            renderBoard();               // buttons change with the role
+        }
+
         function renderRoles() {
-            const chips = $('#chips');
-            chips.replaceChildren(...ROLES.map(([code, label]) =>
-                el('button', {
-                    class: 'chip', type: 'button', 'aria-pressed': String(code === state.role),
-                    onclick: () => { state.role = code; store.set('mes.role', code); renderRoles(); renderBoard(); }
-                }, label)));
-            $('#role-note').textContent = ROLES.find(r => r[0] === state.role)[2];
+            const chips = [];
+            for (const role of ROLES) {
+                chips.push(el('button', {
+                    class: 'chip', type: 'button', 'aria-pressed': String(role.code === state.role),
+                    onclick: function () { chooseRole(role.code); },
+                }, role.label));
+            }
+            find('#chips').replaceChildren(...chips);
+
+            for (const role of ROLES) {
+                if (role.code === state.role) {
+                    find('#role-note').textContent = role.note;
+                }
+            }
         }
 
-        /* Board */
+        // ---- Board ----
+
+        /** One button on a card. Buttons for another role stay visible but explain instead of acting. */
+        function actionButton(wo, action) {
+            const allowed = state.rule || action.role === state.role;
+
+            let cssClass = 'btn ';
+            if (action.danger) {
+                cssClass = 'btn danger';
+            } else if (action.primary && allowed) {
+                cssClass = 'btn primary';
+            }
+
+            let ariaDisabled = false;
+            let title = false;
+            if (!allowed) {
+                ariaDisabled = 'true';
+                title = 'Needs ' + ROLE_LABEL[action.role];
+            }
+
+            function onClick() {
+                if (allowed) {
+                    perform(wo, action);
+                } else {
+                    toast('Switch to ' + ROLE_LABEL[action.role] + ' to use "' + action.label + '".', 'err');
+                }
+            }
+
+            return el('button', { class: cssClass, type: 'button', 'aria-disabled': ariaDisabled, title: title, onclick: onClick }, action.label);
+        }
+
+        /** One work order card. */
         function card(wo) {
-            const ref = wo.batch_no
-                ? el('button', { class: 'ref', type: 'button', title: 'Open batch history', onclick: () => openTrace(wo.batch_no) }, wo.batch_no)
-                : el('span', { class: 'ref plain' }, `Order #${wo.id}`);
-            const acts = ACTIONS.filter(a => state.rule || a.status === wo.status);
-            const buttons = acts.map(a => {
-                const allowed = state.rule || a.role === state.role;
-                const cls = 'btn ' + (a.danger ? 'danger' : (a.primary && allowed ? 'primary' : ''));
-                return el('button', {
-                    class: cls, type: 'button', 'aria-disabled': allowed ? false : 'true',
-                    title: allowed ? false : `Needs ${ROLE_LABEL[a.role]}`,
-                    onclick: () => allowed ? perform(wo, a) : toast(`Switch to ${ROLE_LABEL[a.role]} to use "${a.label}".`, 'err'),
-                }, a.label);
-            });
-            const c = el('article', { class: 'card', 'data-id': wo.id },
+            // After release the card shows its batch number, which opens the batch history
+            let ref;
+            if (wo.batch_no) {
+                ref = el('button', { class: 'ref', type: 'button', title: 'Open batch history', onclick: function () { openTrace(wo.batch_no); } }, wo.batch_no);
+            } else {
+                ref = el('span', { class: 'ref plain' }, 'Order #' + wo.id);
+            }
+
+            // Buttons for this status (or all of them when "Show blocked actions" is ticked)
+            const buttons = [];
+            for (const action of ACTIONS) {
+                if (state.rule || action.status === wo.status) {
+                    buttons.push(actionButton(wo, action));
+                }
+            }
+            let actionsBox = null;
+            if (buttons.length > 0) {
+                actionsBox = el('div', { class: 'acts' }, buttons);
+            }
+
+            return el('article', { class: 'card', 'data-id': wo.id },
                 ref,
                 el('p', { class: 'prod' }, wo.product),
-                el('p', { class: 'meta' }, `${wo.quantity} units · due ${fmtDue(wo.due_date)}`),
-                buttons.length ? el('div', { class: 'acts' }, buttons) : null);
-            return c;
+                el('p', { class: 'meta' }, wo.quantity + ' units · due ' + fmtDue(wo.due_date)),
+                actionsBox);
+        }
+
+        /** The orders that have this status. */
+        function ordersWithStatus(status) {
+            const result = [];
+            for (const order of state.orders) {
+                if (order.status === status) {
+                    result.push(order);
+                }
+            }
+            return result;
         }
 
         function renderBoard() {
-            const wrap = $('#board-wrap');
-            if (!state.orders.length) {
+            const wrap = find('#board-wrap');
+
+            // No orders yet: show a welcome message instead of empty columns
+            if (state.orders.length === 0) {
                 wrap.replaceChildren(el('div', { class: 'empty' },
                     el('h2', {}, 'No work orders yet'),
                     el('p', {}, 'Create the first order to start the line. Orders move left to right as each role completes a step.'),
                     el('button', { class: 'btn primary', type: 'button', onclick: openNewOrder }, 'New work order')));
                 return;
             }
-            const cols = COLUMNS.map(s => {
-                const items = state.orders.filter(o => o.status === s);
-                return el('section', { class: 'col', 'data-s': s, 'aria-label': STATUS_LABEL[s] },
-                    el('div', { class: 'col-head' }, el('h2', {}, STATUS_LABEL[s]), el('span', {}, items.length)),
-                    el('div', { class: 'col-body' }, items.length ? items.map(card) : el('p', { class: 'col-empty' }, 'Nothing here')));
-            });
-            const scrapped = state.orders.filter(o => o.status === 'SCRAPPED');
-            const parts = [el('div', { class: 'board' }, cols)];
-            if (scrapped.length) {
-                parts.push(el('div', { class: 'scrap' }, el('span', {}, `Scrapped (${scrapped.length}):`),
-                    scrapped.map(o => el('button', { class: 'btn', type: 'button', onclick: () => openTrace(o.batch_no) }, o.batch_no))));
+
+            // One column per status
+            const columns = [];
+            for (const status of COLUMNS) {
+                const items = ordersWithStatus(status);
+                let body;
+                if (items.length > 0) {
+                    body = [];
+                    for (const order of items) {
+                        body.push(card(order));
+                    }
+                } else {
+                    body = el('p', { class: 'col-empty' }, 'Nothing here');
+                }
+                columns.push(el('section', { class: 'col', 'data-s': status, 'aria-label': STATUS_LABEL[status] },
+                    el('div', { class: 'col-head' }, el('h2', {}, STATUS_LABEL[status]), el('span', {}, items.length)),
+                    el('div', { class: 'col-body' }, body)));
+            }
+            const parts = [el('div', { class: 'board' }, columns)];
+
+            // Scrapped batches: one small button each, under the board
+            const scrapped = ordersWithStatus('SCRAPPED');
+            if (scrapped.length > 0) {
+                const scrapButtons = [];
+                for (const order of scrapped) {
+                    scrapButtons.push(el('button', { class: 'btn', type: 'button', onclick: function () { openTrace(order.batch_no); } }, order.batch_no));
+                }
+                parts.push(el('div', { class: 'scrap' }, el('span', {}, 'Scrapped (' + scrapped.length + '):'), scrapButtons));
             }
             wrap.replaceChildren(...parts);
-            if (state.flash != null) {
-                const node = wrap.querySelector(`.card[data-id="${state.flash}"]`);
-                if (node) node.classList.add('flash');
+
+            // Briefly highlight the card that just changed
+            if (state.flash !== null) {
+                const node = wrap.querySelector('.card[data-id="' + state.flash + '"]');
+                if (node) {
+                    node.classList.add('flash');
+                }
                 state.flash = null;
             }
         }
 
+        /** Loads the orders from the server and redraws the board. */
         async function refresh() {
             const r = await api('/work-orders');
-            if (r.ok) { state.orders = r.data; renderBoard(); }
-            else toast('Could not load work orders. Is the server running?', 'err');
-        }
-
-        /* Actions */
-        async function perform(wo, a) {
-            const ref = wo.batch_no || `Order #${wo.id}`;
-            const run = async (values = {}) => {
-                const r = await api(`/work-orders/${wo.id}/${a.path}`, 'POST', a.body ? a.body(values) : undefined);
-                if (r.ok) { state.flash = wo.id; toast(`${a.done}: ${ref}`); await refresh(); return null; }
-                return problem(r);
-            };
-            if (a.fields) {
-                openForm({ title: a.label, sub: `${ref} · ${wo.product}`, fields: a.fields, submit: a.label, danger: a.danger, onSubmit: run });
+            if (r.ok) {
+                state.orders = r.data;
+                renderBoard();
             } else {
-                const msg = await run();
-                if (msg) toast(msg, 'err');
+                toast('Could not load work orders. Is the server running?', 'err');
             }
         }
 
-        function openForm({ title, sub, fields, submit, danger, onSubmit }) {
-            const dlg = $('#dlg');
-            const err = el('p', { class: 'form-err', role: 'alert', hidden: true });
-            const form = el('form', { method: 'dialog' },
-                el('h2', { id: 'dlg-title' }, title),
-                sub ? el('p', { class: 'sub' }, sub) : null,
-                fields.map(f => el('div', { class: 'field' },
-                    el('label', { for: 'f-' + f.name }, f.label),
-                    el('input', {
-                        id: 'f-' + f.name, name: f.name, type: f.type || 'text', placeholder: f.placeholder, required: !!f.required,
-                        min: f.min, step: f.step, value: f.value, autocomplete: 'off'
-                    }),
-                    f.hint ? el('p', { class: 'hint' }, f.hint) : null)),
-                err,
-                el('div', { class: 'row-end' },
-                    el('button', { class: 'btn ghost', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
-                    el('button', { class: 'btn ' + (danger ? 'danger solid' : 'primary'), type: 'submit' }, submit)));
-            form.addEventListener('submit', async e => {
-                e.preventDefault();
-                const msg = await onSubmit(Object.fromEntries(new FormData(form)));
-                if (msg) { err.textContent = msg; err.hidden = false; } else dlg.close();
-            });
-            dlg.replaceChildren(form);
-            dlg.showModal();
-            const first = form.querySelector('input');
-            if (first) first.focus();
+        // ---- Actions and forms ----
+
+        /** Runs a card's action. Actions with fields open a form first. */
+        async function perform(wo, action) {
+            const ref = orderRef(wo);
+
+            // Sends the action to the server. Returns null on success, or an error message.
+            async function run(values) {
+                let body = undefined;
+                if (action.body) {
+                    body = action.body(values);
+                }
+                const r = await api('/work-orders/' + wo.id + '/' + action.path, 'POST', body);
+                if (r.ok) {
+                    state.flash = wo.id;
+                    toast(action.done + ': ' + ref);
+                    await refresh();
+                    return null;
+                }
+                return problem(r);
+            }
+
+            if (action.fields) {
+                openForm({ title: action.label, sub: ref + ' · ' + wo.product, fields: action.fields, submit: action.label, danger: action.danger, onSubmit: run });
+            } else {
+                const message = await run({});
+                if (message) {
+                    toast(message, 'err');
+                }
+            }
         }
 
+        /** One label + input (+ optional hint) inside a form. */
+        function formField(f) {
+            let type = 'text';
+            if (f.type) {
+                type = f.type;
+            }
+            let hint = null;
+            if (f.hint) {
+                hint = el('p', { class: 'hint' }, f.hint);
+            }
+            return el('div', { class: 'field' },
+                el('label', { for: 'f-' + f.name }, f.label),
+                el('input', {
+                    id: 'f-' + f.name, name: f.name, type: type, placeholder: f.placeholder, required: f.required === true,
+                    min: f.min, step: f.step, value: f.value, autocomplete: 'off',
+                }),
+                hint);
+        }
+
+        /**
+         * Opens the dialog with a form. onSubmit(values) returns null when it worked (the dialog
+         * closes) or an error message (shown inside the form, so the user can fix the value).
+         */
+        function openForm(options) {
+            const dlg = find('#dlg');
+            const err = el('p', { class: 'form-err', role: 'alert', hidden: true });
+
+            let subLine = null;
+            if (options.sub) {
+                subLine = el('p', { class: 'sub' }, options.sub);
+            }
+            const fields = [];
+            for (const f of options.fields) {
+                fields.push(formField(f));
+            }
+            let submitClass = 'btn primary';
+            if (options.danger) {
+                submitClass = 'btn danger solid';
+            }
+
+            const form = el('form', { method: 'dialog' },
+                el('h2', { id: 'dlg-title' }, options.title),
+                subLine,
+                fields,
+                err,
+                el('div', { class: 'row-end' },
+                    el('button', { class: 'btn ghost', type: 'button', onclick: function () { dlg.close(); } }, 'Cancel'),
+                    el('button', { class: submitClass, type: 'submit' }, options.submit)));
+
+            form.addEventListener('submit', async function (event) {
+                event.preventDefault(); // we send the data ourselves
+                // Collect the form values into { name: value }
+                const values = {};
+                for (const [name, value] of new FormData(form)) {
+                    values[name] = value;
+                }
+                const message = await options.onSubmit(values);
+                if (message) {
+                    err.textContent = message;
+                    err.hidden = false;
+                } else {
+                    dlg.close();
+                }
+            });
+
+            dlg.replaceChildren(form);
+            dlg.showModal();
+            const firstInput = form.querySelector('input');
+            if (firstInput) {
+                firstInput.focus();
+            }
+        }
+
+        /** The Planner's "New work order" form. The due date starts one week from today. */
         function openNewOrder() {
-            const due = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+            const due = new Date(Date.now() + 7 * ONE_DAY_MS).toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+            async function createOrder(values) {
+                const r = await api('/work-orders', 'POST', { product: values.product.trim(), quantity: Number(values.quantity), due_date: values.due_date });
+                if (!r.ok) {
+                    return problem(r);
+                }
+                state.flash = r.data.id;
+                toast('Created: Order #' + r.data.id);
+                await refresh();
+                return null;
+            }
+
             openForm({
                 title: 'New work order', sub: 'Planner creates the order, then releases it to the line.', submit: 'Create work order',
                 fields: [
@@ -968,54 +1331,137 @@
                     { name: 'quantity', label: 'Quantity', type: 'number', min: '1', step: '1', value: '500', required: true },
                     { name: 'due_date', label: 'Due date', type: 'date', value: due, required: true },
                 ],
-                onSubmit: async v => {
-                    const r = await api('/work-orders', 'POST', { product: v.product.trim(), quantity: Number(v.quantity), due_date: v.due_date });
-                    if (!r.ok) return problem(r);
-                    state.flash = r.data.id;
-                    toast(`Created: Order #${r.data.id}`);
-                    await refresh();
-                    return null;
-                },
+                onSubmit: createOrder,
             });
         }
 
-        /* Batch history */
-        function kvGroup(rows) {
-            return el('dl', { class: 'kv kv-group' }, rows.map(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]));
-        }
-        async function openTrace(batch) {
-            const r = await api(`/trace/${encodeURIComponent(batch)}`);
-            if (!r.ok) { toast(r.status === 404 ? `No batch ${batch} found. Batch numbers look like B-0001.` : problem(r), 'err'); return; }
-            const t = r.data, wo = t.work_order, d = $('#drawer');
-            const sections = [
-                el('h3', {}, 'Timeline'),
-                el('ol', { class: 'timeline' }, t.status_history.map(s =>
-                    el('li', {}, el('strong', {}, STATUS_LABEL[s.to_status] || s.to_status), el('small', {}, `${ROLE_LABEL[s.role] || s.role} · ${fmtTime(s.changed_at)}`)))),
-            ];
-            if (t.material_lots.length) sections.push(el('h3', {}, 'Material lots'), t.material_lots.map(m => kvGroup([['Lot', m.lot_no], ['Quantity', m.qty], ['Issued', fmtTime(m.issued_at)]])));
-            if (t.production.length) sections.push(el('h3', {}, 'Production'), t.production.map(p => kvGroup([['Good', p.good_qty], ['Rejected', p.rejected_qty], p.reason_code ? ['Reason', p.reason_code] : null].filter(Boolean))));
-            if (t.qc.length) sections.push(el('h3', {}, 'Quality checks'), t.qc.map(q => kvGroup([['Result', q.result === 'PASS' ? 'Pass' : 'Fail'],
-            q.defect_type ? ['Defect', q.defect_type] : null, q.disposition ? ['Decision', q.disposition === 'REWORK' ? 'Rework' : 'Scrap'] : null].filter(Boolean))));
-            if (t.dispatch.length) sections.push(el('h3', {}, 'Dispatch'), t.dispatch.map(x => kvGroup([['Customer order', x.customer_order], ['Quantity', x.qty], ['Dispatched', fmtTime(x.dispatched_at)]])));
-            d.replaceChildren(
-                el('div', { class: 'dr-head' },
-                    el('div', {}, el('h2', {}, wo.batch_no), el('p', {}, `${wo.product} · ${wo.quantity} units · due ${fmtDue(wo.due_date)}`),
-                        el('span', { class: 'badge ' + wo.status }, STATUS_LABEL[wo.status] || wo.status)),
-                    el('button', { class: 'btn', type: 'button', onclick: () => d.close() }, 'Close')),
-                el('div', { class: 'dr-body' }, sections));
-            d.showModal();
+        // ---- Batch history (the drawer) ----
+
+        /** A small table of [name, value] pairs, e.g. [['Lot', 'L-101'], ['Quantity', 100]]. */
+        function kvGroup(pairs) {
+            const items = [];
+            for (const pair of pairs) {
+                items.push(el('dt', {}, pair[0]));
+                items.push(el('dd', {}, pair[1]));
+            }
+            return el('dl', { class: 'kv kv-group' }, items);
         }
 
-        /* Wiring */
-        $('#new-order').addEventListener('click', openNewOrder);
-        $('#rule').addEventListener('change', e => { state.rule = e.target.checked; renderBoard(); });
-        $('#search').addEventListener('submit', e => {
-            e.preventDefault();
-            const v = $('#find').value.trim().toUpperCase();
-            if (v) openTrace(v);
+        /** Opens the full history of one batch (R8 traceability). */
+        async function openTrace(batch) {
+            const r = await api('/trace/' + encodeURIComponent(batch));
+            if (!r.ok) {
+                if (r.status === 404) {
+                    toast('No batch ' + batch + ' found. Batch numbers look like B-0001.', 'err');
+                } else {
+                    toast(problem(r), 'err');
+                }
+                return;
+            }
+            const t = r.data;
+            const wo = t.work_order;
+            const drawer = find('#drawer');
+
+            // Timeline: every status change, with who made it and when
+            const steps = [];
+            for (const s of t.status_history) {
+                let statusText = STATUS_LABEL[s.to_status];
+                if (!statusText) {
+                    statusText = s.to_status;
+                }
+                let roleText = ROLE_LABEL[s.role];
+                if (!roleText) {
+                    roleText = s.role;
+                }
+                steps.push(el('li', {}, el('strong', {}, statusText), el('small', {}, roleText + ' · ' + fmtTime(s.changed_at))));
+            }
+            const sections = [el('h3', {}, 'Timeline'), el('ol', { class: 'timeline' }, steps)];
+
+            // Each other section appears only if the batch has rows for it
+            if (t.material_lots.length > 0) {
+                sections.push(el('h3', {}, 'Material lots'));
+                for (const m of t.material_lots) {
+                    sections.push(kvGroup([['Lot', m.lot_no], ['Quantity', m.qty], ['Issued', fmtTime(m.issued_at)]]));
+                }
+            }
+            if (t.production.length > 0) {
+                sections.push(el('h3', {}, 'Production'));
+                for (const p of t.production) {
+                    const pairs = [['Good', p.good_qty], ['Rejected', p.rejected_qty]];
+                    if (p.reason_code) {
+                        pairs.push(['Reason', p.reason_code]);
+                    }
+                    sections.push(kvGroup(pairs));
+                }
+            }
+            if (t.qc.length > 0) {
+                sections.push(el('h3', {}, 'Quality checks'));
+                for (const q of t.qc) {
+                    let resultText = 'Fail';
+                    if (q.result === 'PASS') {
+                        resultText = 'Pass';
+                    }
+                    const pairs = [['Result', resultText]];
+                    if (q.defect_type) {
+                        pairs.push(['Defect', q.defect_type]);
+                    }
+                    if (q.disposition) {
+                        let decisionText = 'Scrap';
+                        if (q.disposition === 'REWORK') {
+                            decisionText = 'Rework';
+                        }
+                        pairs.push(['Decision', decisionText]);
+                    }
+                    sections.push(kvGroup(pairs));
+                }
+            }
+            if (t.dispatch.length > 0) {
+                sections.push(el('h3', {}, 'Dispatch'));
+                for (const x of t.dispatch) {
+                    sections.push(kvGroup([['Customer order', x.customer_order], ['Quantity', x.qty], ['Dispatched', fmtTime(x.dispatched_at)]]));
+                }
+            }
+
+            let statusText = STATUS_LABEL[wo.status];
+            if (!statusText) {
+                statusText = wo.status;
+            }
+            drawer.replaceChildren(
+                el('div', { class: 'dr-head' },
+                    el('div', {},
+                        el('h2', {}, wo.batch_no),
+                        el('p', {}, wo.product + ' · ' + wo.quantity + ' units · due ' + fmtDue(wo.due_date)),
+                        el('span', { class: 'badge ' + wo.status }, statusText)),
+                    el('button', { class: 'btn', type: 'button', onclick: function () { drawer.close(); } }, 'Close')),
+                el('div', { class: 'dr-body' }, sections));
+            drawer.showModal();
+        }
+
+        // ---- Wiring: connect the page's fixed buttons, then draw everything ----
+
+        find('#new-order').addEventListener('click', openNewOrder);
+
+        find('#rule').addEventListener('change', function (event) {
+            state.rule = event.target.checked;
+            renderBoard();
         });
+
+        // Batch search: "b-0001" works too, because we turn it into capitals
+        find('#search').addEventListener('submit', function (event) {
+            event.preventDefault();
+            const batch = find('#find').value.trim().toUpperCase();
+            if (batch) {
+                openTrace(batch);
+            }
+        });
+
+        // Clicking the dark area outside a dialog closes it
         for (const id of ['#dlg', '#drawer']) {
-            $(id).addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+            find(id).addEventListener('click', function (event) {
+                if (event.target === event.currentTarget) {
+                    event.currentTarget.close();
+                }
+            });
         }
 
         renderRoles();

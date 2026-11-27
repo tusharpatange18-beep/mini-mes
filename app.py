@@ -70,13 +70,16 @@ CREATE TABLE IF NOT EXISTS status_log (
 
 
 def db():
-    conn = sqlite3.connect(os.environ.get("MES_DB", os.path.join(HERE, "mes.db")))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    """Opens the SQLite database. Tests set MES_DB to use a fresh file of their own."""
+    db_path = os.environ.get("MES_DB", os.path.join(HERE, "mes.db"))
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row             # rows behave like dicts: row["status"]
+    conn.execute("PRAGMA foreign_keys = ON")   # SQLite only checks REFERENCES when this is on
     return conn
 
 
 def init_db():
+    """Creates the tables if they don't exist yet (safe to run on every start)."""
     conn = db()
     conn.executescript(SCHEMA)
     conn.commit()
@@ -84,15 +87,19 @@ def init_db():
 
 
 def now():
+    """Current time as text, e.g. '2026-10-09T14:30:00'."""
     return datetime.now().isoformat(timespec="seconds")
 
 
 def need_role(role: Optional[str], *allowed: str):
+    """403 Forbidden unless the X-Role header is one of the allowed roles."""
     if role not in allowed:
-        raise HTTPException(403, f"Role {role!r} is not allowed. Allowed: {', '.join(allowed)}")
+        allowed_text = ", ".join(allowed)
+        raise HTTPException(403, f"Role {role!r} is not allowed. Allowed: {allowed_text}")
 
 
 def get_wo(conn, wo_id: int):
+    """Loads one work order, or answers 404 Not Found."""
     wo = conn.execute("SELECT * FROM work_orders WHERE id = ?", (wo_id,)).fetchone()
     if wo is None:
         raise HTTPException(404, "Work order not found")
@@ -100,16 +107,29 @@ def get_wo(conn, wo_id: int):
 
 
 def need_status(wo, *allowed: str, msg: str):
+    """409 Conflict unless the work order is in one of the allowed statuses (the process rules)."""
     if wo["status"] not in allowed:
         raise HTTPException(409, f"{msg} (current status: {wo['status']})")
 
 
 def set_status(conn, wo, new_status: str, role: str):
+    """Changes the status and writes a line to status_log, so every change can be traced (R8)."""
     conn.execute("UPDATE work_orders SET status = ? WHERE id = ?", (new_status, wo["id"]))
     conn.execute(
         "INSERT INTO status_log (wo_id, from_status, to_status, role, changed_at) VALUES (?,?,?,?,?)",
         (wo["id"], wo["status"], new_status, role, now()),
     )
+
+
+def rows_as_dicts(cursor):
+    """Turns database rows into plain dicts, which FastAPI can send as JSON."""
+    result = []
+    for row in cursor:
+        result.append(dict(row))
+    return result
+
+
+# ---- Request bodies. Pydantic checks them before the endpoint runs (422 if invalid). ----
 
 
 class NewWorkOrder(BaseModel):
@@ -130,11 +150,11 @@ class ProductionReport(BaseModel):
 
 
 class QcResult(BaseModel):
-    result: str = Field(pattern="^(PASS|FAIL)$")
+    result: str = Field(pattern="^(PASS|FAIL)$")       # only these two words are accepted
 
 
 class Disposition(BaseModel):
-    decision: str = Field(pattern="^(REWORK|SCRAP)$")
+    decision: str = Field(pattern="^(REWORK|SCRAP)$")  # only these two words are accepted
     defect_type: str = Field(min_length=1)
 
 
@@ -142,6 +162,10 @@ class Dispatch(BaseModel):
     customer_order: str = Field(min_length=1)
     qty: int = Field(gt=0)
 
+
+# ---- Endpoints. Each one follows the same steps: check the role, load the work order,
+# ---- check its status, write the change, commit, and return the updated work order.
+# ---- x_role comes from the "X-Role" HTTP header (FastAPI turns X-Role into x_role).
 
 @app.post("/work-orders", status_code=201)  # R1
 def create_work_order(body: NewWorkOrder, x_role: Optional[str] = Header(None)):
@@ -151,12 +175,14 @@ def create_work_order(body: NewWorkOrder, x_role: Optional[str] = Header(None)):
         "INSERT INTO work_orders (product, quantity, due_date, status, created_at) VALUES (?,?,?,?,?)",
         (body.product, body.quantity, body.due_date, "CREATED", now()),
     )
+    new_id = cur.lastrowid  # the id SQLite gave the new row
+    # First line of the history: from nothing (None) to CREATED
     conn.execute(
         "INSERT INTO status_log (wo_id, from_status, to_status, role, changed_at) VALUES (?,?,?,?,?)",
-        (cur.lastrowid, None, "CREATED", x_role, now()),
+        (new_id, None, "CREATED", x_role, now()),
     )
     conn.commit()
-    row = get_wo(conn, cur.lastrowid)
+    row = get_wo(conn, new_id)
     return dict(row)
 
 
@@ -166,6 +192,7 @@ def release(wo_id: int, x_role: Optional[str] = Header(None)):
     conn = db()
     wo = get_wo(conn, wo_id)
     need_status(wo, "CREATED", msg="Only a Created work order can be released")
+    # The batch number is the id with leading zeros: order 7 -> "B-0007"
     batch_no = f"B-{wo_id:04d}"
     conn.execute("UPDATE work_orders SET batch_no = ? WHERE id = ?", (batch_no, wo_id))
     set_status(conn, wo, "RELEASED", x_role)
@@ -193,7 +220,9 @@ def start_production(wo_id: int, x_role: Optional[str] = Header(None)):
     conn = db()
     wo = get_wo(conn, wo_id)
     need_status(wo, "RELEASED", msg="Work order must be Released to start production")
-    issued = conn.execute("SELECT COUNT(*) FROM material_issues WHERE wo_id = ?", (wo_id,)).fetchone()[0]
+    # Production may only start once at least one material lot has been issued
+    count_row = conn.execute("SELECT COUNT(*) FROM material_issues WHERE wo_id = ?", (wo_id,)).fetchone()
+    issued = count_row[0]
     if issued == 0:
         raise HTTPException(409, "Issue material before starting production")
     set_status(conn, wo, "IN_PRODUCTION", x_role)
@@ -207,8 +236,12 @@ def report_production(wo_id: int, body: ProductionReport, x_role: Optional[str] 
     conn = db()
     wo = get_wo(conn, wo_id)
     need_status(wo, "IN_PRODUCTION", msg="Production can only be reported while In production")
-    if body.rejected_qty > 0 and not (body.reason_code and body.reason_code.strip()):
+
+    # Rejected units need a reason code; a code of only spaces does not count
+    has_reason = body.reason_code is not None and body.reason_code.strip() != ""
+    if body.rejected_qty > 0 and not has_reason:
         raise HTTPException(422, "A reason code is required when rejected quantity is above 0")
+    # The line can't make more than the order asked for
     if body.good_qty + body.rejected_qty > wo["quantity"]:
         raise HTTPException(422, "Good plus rejected quantity cannot exceed the work order quantity")
     conn.execute(
@@ -230,7 +263,10 @@ def record_qc(wo_id: int, body: QcResult, x_role: Optional[str] = Header(None)):
         "INSERT INTO qc_results (wo_id, result, inspector_role, recorded_at) VALUES (?,?,?,?)",
         (wo_id, body.result, x_role, now()),
     )
-    set_status(conn, wo, "QC_PASSED" if body.result == "PASS" else "QC_FAILED", x_role)
+    if body.result == "PASS":
+        set_status(conn, wo, "QC_PASSED", x_role)
+    else:
+        set_status(conn, wo, "QC_FAILED", x_role)
     conn.commit()
     return dict(get_wo(conn, wo_id))
 
@@ -241,12 +277,16 @@ def disposition(wo_id: int, body: Disposition, x_role: Optional[str] = Header(No
     conn = db()
     wo = get_wo(conn, wo_id)
     need_status(wo, "QC_FAILED", msg="Only a QC failed batch can be sent to rework or scrap")
+    # Write the decision onto this order's latest QC result (the one that failed)
     conn.execute(
         "UPDATE qc_results SET defect_type = ?, disposition = ? "
         "WHERE id = (SELECT MAX(id) FROM qc_results WHERE wo_id = ?)",
         (body.defect_type, body.decision, wo_id),
     )
-    set_status(conn, wo, "IN_PRODUCTION" if body.decision == "REWORK" else "SCRAPPED", x_role)
+    if body.decision == "REWORK":
+        set_status(conn, wo, "IN_PRODUCTION", x_role)  # back to the line to be fixed
+    else:
+        set_status(conn, wo, "SCRAPPED", x_role)       # thrown away, the order ends here
     conn.commit()
     return dict(get_wo(conn, wo_id))
 
@@ -268,6 +308,22 @@ def dispatch(wo_id: int, body: Dispatch, x_role: Optional[str] = Header(None)):
     conn = db()
     wo = get_wo(conn, wo_id)
     need_status(wo, "QC_PASSED", msg="Only a batch that passed QC can be dispatched")
+
+    # Only units that were actually produced as good can be dispatched.
+    # After a rework there can be several reports; the latest one is the
+    # batch that just passed QC, so that is the one we compare against.
+    # (It always exists: a batch reaches QC_PASSED only after a production report.)
+    latest = conn.execute(
+        "SELECT good_qty FROM production_reports WHERE wo_id = ? ORDER BY id DESC LIMIT 1",
+        (wo_id,),
+    ).fetchone()
+    good_qty = latest["good_qty"]
+    if body.qty > good_qty:
+        raise HTTPException(
+            422,
+            f"Cannot dispatch {body.qty} units: only {good_qty} good units were produced",
+        )
+
     conn.execute(
         "INSERT INTO dispatches (wo_id, customer_order, qty, dispatched_at) VALUES (?,?,?,?)",
         (wo_id, body.customer_order, body.qty, now()),
@@ -279,29 +335,40 @@ def dispatch(wo_id: int, body: Dispatch, x_role: Optional[str] = Header(None)):
 
 @app.get("/work-orders")
 def list_work_orders():
+    """All work orders, newest first. Any role may read."""
     conn = db()
-    return [dict(r) for r in conn.execute("SELECT * FROM work_orders ORDER BY id DESC")]
+    cursor = conn.execute("SELECT * FROM work_orders ORDER BY id DESC")
+    return rows_as_dicts(cursor)
+
+
+def rows_for_order(conn, table: str, wo_id: int):
+    """Every row of one history table that belongs to this work order, oldest first.
+    The table name is put into the SQL text, which is only safe because the callers below
+    pass fixed names, never user input. The id is passed as a ? parameter as usual."""
+    cursor = conn.execute(f"SELECT * FROM {table} WHERE wo_id = ? ORDER BY id", (wo_id,))
+    return rows_as_dicts(cursor)
 
 
 @app.get("/trace/{batch_no}")  # R8
 def trace(batch_no: str):
+    """Batch traceability: everything that happened to one batch, in one response."""
     conn = db()
     wo = conn.execute("SELECT * FROM work_orders WHERE batch_no = ?", (batch_no,)).fetchone()
     if wo is None:
         raise HTTPException(404, "Batch not found")
 
-    def rows(table, order="id"):
-        return [dict(r) for r in conn.execute(f"SELECT * FROM {table} WHERE wo_id = ? ORDER BY {order}", (wo["id"],))]
-
+    wo_id = wo["id"]
     return {
         "work_order": dict(wo),
-        "material_lots": rows("material_issues"),
-        "production": rows("production_reports"),
-        "qc": rows("qc_results"),
-        "dispatch": rows("dispatches"),
-        "status_history": rows("status_log"),
+        "material_lots": rows_for_order(conn, "material_issues", wo_id),
+        "production": rows_for_order(conn, "production_reports", wo_id),
+        "qc": rows_for_order(conn, "qc_results", wo_id),
+        "dispatch": rows_for_order(conn, "dispatches", wo_id),
+        "status_history": rows_for_order(conn, "status_log", wo_id),
     }
 
 
+# Runs once when the server starts: create the tables, then serve the web UI from /static.
+# The UI is mounted last so the API routes above take priority over the file server.
 init_db()
 app.mount("/", StaticFiles(directory=os.path.join(HERE, "static"), html=True), name="static")

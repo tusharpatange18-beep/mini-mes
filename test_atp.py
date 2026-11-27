@@ -145,6 +145,32 @@ def test_tc10_dispatch_and_trace(client):  # R7, R8
     assert [s["to_status"] for s in trace["status_history"]][-1] == "DISPATCHED"
 
 
+def test_dispatch_more_than_good_quantity_is_blocked(client):  # R7 (negative)
+    wo = to_qc_pending(client)  # reports 480 good, 20 rejected
+    qc(client, wo, "PASS")
+    r = client.post(f"/work-orders/{wo}/dispatch", json={"customer_order": "CO-77", "qty": 481},
+                    headers=as_role("DISPATCH_CLERK"))
+    assert r.status_code == 422
+    assert "only 480 good units" in r.json()["detail"]
+    assert status(client, wo) == "QC_PASSED"  # nothing was dispatched
+
+
+def test_dispatch_limit_uses_latest_report_after_rework(client):  # R6, R7
+    wo = to_qc_pending(client)  # first report: 480 good
+    qc(client, wo, "FAIL")
+    client.post(f"/work-orders/{wo}/disposition", json={"decision": "REWORK", "defect_type": "Underfill"},
+                headers=as_role("QC_INSPECTOR"))
+    client.post(f"/work-orders/{wo}/production", json={"good_qty": 300, "rejected_qty": 0},
+                headers=as_role("OPERATOR"))  # after rework: 300 good
+    qc(client, wo, "PASS")
+    too_many = client.post(f"/work-orders/{wo}/dispatch", json={"customer_order": "CO-78", "qty": 301},
+                           headers=as_role("DISPATCH_CLERK"))
+    assert too_many.status_code == 422
+    exact = client.post(f"/work-orders/{wo}/dispatch", json={"customer_order": "CO-78", "qty": 300},
+                        headers=as_role("DISPATCH_CLERK"))
+    assert exact.status_code == 200
+
+
 def test_wrong_role_is_rejected(client):  # role-based access
     r = client.post("/work-orders", json={"product": "X", "quantity": 1, "due_date": "2026-10-20"},
                     headers=as_role("OPERATOR"))

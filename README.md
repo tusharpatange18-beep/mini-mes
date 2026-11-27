@@ -19,7 +19,7 @@ Pick a role in the UI (Planner, Store Keeper, Line Operator, QC Inspector, Dispa
 pytest -v
 ```
 
-`test_atp.py` holds one automated test per test case (TC01 to TC10) in the Acceptance Test Plan, plus a role check.
+`test_atp.py` holds one automated test per test case (TC01 to TC10) in the Acceptance Test Plan, plus a role check and two dispatch-quantity checks.
 
 ## Requirements and where they live
 
@@ -31,7 +31,7 @@ pytest -v
 | R4 | Operator starts production, reports good and rejected quantity; a reason code is required for rejects | `POST /work-orders/{id}/start`, `POST /work-orders/{id}/production` |
 | R5 | QC Inspector records pass or fail; a failed batch cannot move to finished goods | `POST /work-orders/{id}/qc`, `POST /work-orders/{id}/finished-goods` |
 | R6 | A failed batch goes to rework or scrap, with defect type | `POST /work-orders/{id}/disposition` |
-| R7 | Only a batch that passed QC can be dispatched | `POST /work-orders/{id}/dispatch` |
+| R7 | Only a batch that passed QC can be dispatched, and never more than the good quantity of its latest production report | `POST /work-orders/{id}/dispatch` |
 | R8 | Batch traceability: work order, material lots, production, QC, dispatch, status history | `GET /trace/{batch_no}` |
 
 ## Work order status flow
